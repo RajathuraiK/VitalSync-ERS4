@@ -225,30 +225,58 @@ export default function UserDashboard() {
             )}
 
             {/* Sensor Status Card */}
-            <div className="card p-4">
-              <p className="section-title">Sensor Status</p>
+            <div className="card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="section-title mb-0">Live Sensor Telemetry</p>
+                {!motionEnabled && (
+                  <button
+                    onClick={async () => {
+                      const granted = await shake.requestPermission();
+                      setMotionEnabled(granted);
+                    }}
+                    className="text-[11px] bg-brand-50 text-brand-700 font-semibold px-2 py-0.5 rounded-md hover:bg-brand-100"
+                  >
+                    Enable Sensor
+                  </button>
+                )}
+              </div>
+
               <div className="grid grid-cols-3 gap-3">
-                <div className={`rounded-xl p-3 text-center ${shake.isShaking ? 'bg-brand-50' : 'bg-gray-50'}`}>
-                  <Activity className={`w-5 h-5 mx-auto mb-1 ${shake.isShaking ? 'text-brand-600 animate-pulse-fast' : 'text-gray-400'}`} />
-                  <p className="text-xs font-medium text-gray-600">Shake</p>
-                  <p className={`text-xs font-bold ${shake.isShaking ? 'text-brand-700' : 'text-gray-400'}`}>
-                    {shake.magnitude.toFixed(1)}
+                <div className={`rounded-xl p-3 text-center transition-all ${shake.isShaking ? 'bg-brand-100 border border-brand-300' : 'bg-gray-50'}`}>
+                  <Activity className={`w-5 h-5 mx-auto mb-1 ${shake.isShaking ? 'text-brand-600 animate-pulse' : 'text-gray-400'}`} />
+                  <p className="text-[11px] font-medium text-gray-500">Acceleration</p>
+                  <p className={`text-sm font-bold ${shake.isShaking ? 'text-brand-700' : 'text-gray-700'}`}>
+                    {shake.magnitude.toFixed(1)} <span className="text-[10px] font-normal text-gray-400">m/s²</span>
                   </p>
                 </div>
-                <div className={`rounded-xl p-3 text-center ${shake.isStill ? 'bg-yellow-50' : 'bg-gray-50'}`}>
+
+                <div className={`rounded-xl p-3 text-center transition-all ${shake.isStill ? 'bg-yellow-50 border border-yellow-200' : 'bg-gray-50'}`}>
                   <Shield className={`w-5 h-5 mx-auto mb-1 ${shake.isStill ? 'text-yellow-600' : 'text-gray-400'}`} />
-                  <p className="text-xs font-medium text-gray-600">Stillness</p>
-                  <p className={`text-xs font-bold ${shake.isStill ? 'text-yellow-700' : 'text-gray-400'}`}>
-                    {shake.stillnessDuration.toFixed(0)}s
+                  <p className="text-[11px] font-medium text-gray-500">Stillness</p>
+                  <p className={`text-sm font-bold ${shake.isStill ? 'text-yellow-700' : 'text-gray-700'}`}>
+                    {shake.stillnessDuration.toFixed(1)}s
                   </p>
                 </div>
-                <div className={`rounded-xl p-3 text-center ${motionEnabled ? 'bg-green-50' : 'bg-gray-50'}`}>
+
+                <div className={`rounded-xl p-3 text-center transition-all ${motionEnabled ? 'bg-green-50' : 'bg-gray-50'}`}>
                   <Zap className={`w-5 h-5 mx-auto mb-1 ${motionEnabled ? 'text-green-600' : 'text-gray-400'}`} />
-                  <p className="text-xs font-medium text-gray-600">Motion</p>
+                  <p className="text-[11px] font-medium text-gray-500">Detector</p>
                   <p className={`text-xs font-bold ${motionEnabled ? 'text-green-700' : 'text-gray-400'}`}>
-                    {motionEnabled ? 'On' : 'Off'}
+                    {motionEnabled ? 'Active' : 'Standby'}
                   </p>
                 </div>
+              </div>
+
+              {/* Quick Demo Simulator button */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => shake.simulateShake(15.2, 2.5)}
+                  className="w-full text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 rounded-xl flex items-center justify-center gap-1.5 transition-colors border border-gray-200"
+                >
+                  <Activity className="w-3.5 h-3.5 text-brand-600" />
+                  Simulate Hard Shake & Fall (15.2 m/s²)
+                </button>
               </div>
             </div>
 

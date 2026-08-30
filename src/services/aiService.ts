@@ -9,81 +9,116 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 // ──────────────────────────────────────────────
-//  Emergency Confidence Scoring
-//
-//  🔧 DEMO MODE — Low thresholds, scores HIGH easily
-//
-//  Scoring breakdown:
-//    Shake magnitude  → max 45 pts  (starts at 3 m/s²)
-//    Stillness        → max 35 pts  (even 0.5s counts)
-//    Audio level      → max 15 pts
-//    Camera capture   → bonus 10 pts
-//
-//  Classification:
-//    HIGH if score ≥ 20  (was 65 — triggers from light shake)
-//    LOW  if score < 20
-//
-//  For production: raise HIGH_THRESHOLD to 65 and
-//  change SHAKE_BASE to 15
+//  Distress Keywords Dictionary
 // ──────────────────────────────────────────────
+export const DISTRESS_KEYWORDS = [
+  'help', 'hospital', 'accident', 'emergency', 'ambulance',
+  'doctor', 'pain', 'bleeding', 'blood', 'crash',
+  'fell', 'fall', 'hurt', 'unconscious', 'save me',
+  'cannot breathe', 'breathe', 'broken', 'stroke', 'chest pain'
+];
 
-const SHAKE_BASE      = 3;   // m/s² — where scoring starts (matches hook)
-const HIGH_THRESHOLD  = 20;  // score needed to classify HIGH (was 65)
+export function extractDistressKeywords(text = ''): string[] {
+  const lower = text.toLowerCase();
+  return DISTRESS_KEYWORDS.filter(kw => lower.includes(kw));
+}
 
-function computeLocalScore(sensor: SensorData): number {
+// ──────────────────────────────────────────────
+//  Emergency Confidence Scoring
+//  Multimodal scoring:
+//    1. Distress keywords (live transcribed audio) -> up to 35 pts
+//    2. Audio vocalization / volume amplitude       -> up to 15 pts
+//    3. Shake / impact magnitude                    -> up to 30 pts
+//    4. Post-impact stillness                       -> up to 25 pts
+//    5. Camera frame presence                       -> up to 10 pts
+// ──────────────────────────────────────────────
+const SHAKE_BASE     = 8;   // m/s² — base threshold for deliberate impact
+const HIGH_THRESHOLD = 45;  // score required to classify HIGH
+
+function computeLocalScore(sensor: SensorData): { score: number; reasoning: string; keywords: string[] } {
   let score = 0;
+  const reasons: string[] = [];
 
-  // Shake magnitude contribution (max 45 pts)
-  // Any shake above SHAKE_BASE starts scoring immediately
-  if (sensor.maxShakeMagnitude > SHAKE_BASE) {
-    const shakePts = Math.min(45, ((sensor.maxShakeMagnitude - SHAKE_BASE) / 10) * 45);
-    score += Math.max(12, shakePts); // guaranteed 12 pts if threshold crossed
+  // 1. Distress Speech / Voice Keywords
+  const transcript = sensor.speechTranscript || '';
+  const detectedKeywords = extractDistressKeywords(transcript);
+
+  if (detectedKeywords.length > 0) {
+    const kwPts = Math.min(35, detectedKeywords.length * 18);
+    score += kwPts;
+    reasons.push(`Distress keywords detected: "${detectedKeywords.join(', ').toUpperCase()}"`);
+  } else if (transcript.trim().length > 0) {
+    score += 10;
+    reasons.push(`Voice activity recorded: "${transcript.slice(0, 40)}…"`);
   }
 
-  // Stillness after shake (max 35 pts)
-  // Even a brief 0.5s stillness contributes
-  if (sensor.stillnessDuration > 0) {
-    const stillPts = Math.min(35, (sensor.stillnessDuration / 3) * 35);
-    score += Math.max(stillPts, sensor.stillnessDuration > 0 ? 10 : 0);
+  // 2. Audio Level / Distress Vocalization
+  if (sensor.audioLevel > 0.05) {
+    const audioPts = Math.min(15, Math.round(sensor.audioLevel * 20));
+    score += audioPts;
+    if (sensor.audioLevel > 0.3) {
+      reasons.push(`High acoustic energy / distress sound (${Math.round(sensor.audioLevel * 100)}%)`);
+    }
   }
 
-  // Audio level (max 15 pts)
-  if (sensor.audioLevel > 0) {
-    score += sensor.audioLevel * 15;
+  // 3. Shake / Impact Magnitude
+  if (sensor.maxShakeMagnitude >= SHAKE_BASE) {
+    const shakePts = Math.min(30, Math.round(((sensor.maxShakeMagnitude - SHAKE_BASE) / 12) * 30 + 15));
+    score += shakePts;
+    reasons.push(`Impact acceleration: ${sensor.maxShakeMagnitude.toFixed(1)} m/s²`);
+  } else if (sensor.maxShakeMagnitude > 3) {
+    score += 10;
   }
 
-  // Camera detected (bonus 10 pts)
-  if (sensor.cameraCapture) score += 10;
+  // 4. Post-Impact Stillness
+  if (sensor.stillnessDuration > 0.5) {
+    const stillPts = Math.min(25, Math.round((sensor.stillnessDuration / 3) * 25));
+    score += Math.max(12, stillPts);
+    reasons.push(`${sensor.stillnessDuration.toFixed(1)}s post-crash stillness`);
+  }
 
-  return Math.min(100, Math.round(score));
+  // 5. Camera capture visual context bonus
+  if (sensor.cameraCapture) {
+    score += 10;
+    reasons.push('Scene frame captured');
+  }
+
+  const finalScore = Math.min(99, Math.max(15, Math.round(score)));
+  const explanation = reasons.length > 0
+    ? reasons.join(' • ')
+    : `Readings: shake ${sensor.maxShakeMagnitude.toFixed(1)} m/s², audio ${Math.round(sensor.audioLevel * 100)}%`;
+
+  return { score: finalScore, reasoning: explanation, keywords: detectedKeywords };
 }
 
 export async function analyseEmergency(sensor: SensorData): Promise<AIAnalysisResult> {
-  // Try Gemini first if API key available
+  const localAnalysis = computeLocalScore(sensor);
+  sensor.distressKeywords = localAnalysis.keywords;
+
+  // Try Gemini 1.5 Multimodal if API key is provided
   if (GEMINI_API_KEY && GEMINI_API_KEY !== 'YOUR_GEMINI_KEY') {
     try {
-      const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] = [
-        {
-          text: `You are an emergency detection AI. Analyse the following sensor data and classify the emergency.
+      const promptText = `You are a real-time Emergency Triage AI assistant (VitalSync). Analyze this incident telemetry and classify the emergency.
 
-Sensor Data:
-- Max shake magnitude: ${sensor.maxShakeMagnitude.toFixed(2)} m/s² (demo threshold: ${SHAKE_BASE} m/s²)
-- Stillness duration after shake: ${sensor.stillnessDuration.toFixed(1)} seconds
-- Audio level: ${(sensor.audioLevel * 100).toFixed(0)}%
-- Camera capture: ${sensor.cameraCapture ? 'Available' : 'Not available'}
+Telemetry:
+- Transcribed Voice / Speech: "${sensor.speechTranscript || 'No speech transcribed'}"
+- Distress Keywords Detected: ${localAnalysis.keywords.join(', ') || 'None'}
+- Max Impact Magnitude: ${sensor.maxShakeMagnitude.toFixed(1)} m/s²
+- Post-Impact Stillness Duration: ${sensor.stillnessDuration.toFixed(1)} seconds
+- Ambient Audio Energy: ${(sensor.audioLevel * 100).toFixed(0)}%
+- Visual Capture: ${sensor.cameraCapture ? 'Camera snapshot attached' : 'No camera snapshot'}
 
-Analyse the video frame (if provided), audio level, and movement pattern.
-Look for: signs of distress in the image, unusual body position, high audio indicating distress.
+Analyze distress vocalizations (shouts for help, mentions of hospital/accident), stillness suggesting immobilization or unconsciousness, impact severity, and visual environment (e.g. fallen posture, trauma signs, road/vehicle ambience).
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with a JSON object in this exact format:
 {
   "classification": "HIGH" or "LOW",
-  "confidenceScore": <0-100>,
-  "reasoning": "<one sentence explanation>"
-}
+  "confidenceScore": <integer between 0 and 100>,
+  "reasoning": "<concise clinical assessment in one or two sentences>"
+}`;
 
-HIGH = likely real emergency (accident/medical crisis). LOW = likely false alarm.`,
-        },
+      const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] = [
+        { text: promptText },
       ];
 
       if (sensor.cameraCapture) {
@@ -107,27 +142,23 @@ HIGH = likely real emergency (accident/medical crisis). LOW = likely false alarm
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         return {
-          classification:  parsed.classification  || 'LOW',
-          confidenceScore: parsed.confidenceScore || 0,
-          reasoning:       parsed.reasoning       || '',
+          classification:  (parsed.classification === 'HIGH' || parsed.classification === 'LOW') ? parsed.classification : 'HIGH',
+          confidenceScore: Number(parsed.confidenceScore) || localAnalysis.score,
+          reasoning:       parsed.reasoning || localAnalysis.reasoning,
           timestamp:       Date.now(),
         };
       }
     } catch {
-      // Fallback to local scoring
+      // Fallback to enhanced local scoring
     }
   }
 
-  // ── Local threshold-based fallback ──────────
-  const score = computeLocalScore(sensor);
+  // ── Enhanced Local Fallback ──────────
   return {
-    classification:  score >= HIGH_THRESHOLD ? 'HIGH' : 'LOW',
-    confidenceScore: score,
-    reasoning:
-      score >= HIGH_THRESHOLD
-        ? `Emergency detected: shake ${sensor.maxShakeMagnitude.toFixed(1)} m/s², ${sensor.stillnessDuration.toFixed(1)}s stillness, audio ${(sensor.audioLevel * 100).toFixed(0)}%.`
-        : `Low confidence: readings below emergency threshold (score: ${score}/100).`,
-    timestamp: Date.now(),
+    classification:  localAnalysis.score >= HIGH_THRESHOLD ? 'HIGH' : 'LOW',
+    confidenceScore: localAnalysis.score,
+    reasoning:       localAnalysis.reasoning,
+    timestamp:       Date.now(),
   };
 }
 

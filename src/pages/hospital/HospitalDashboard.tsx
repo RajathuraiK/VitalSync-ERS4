@@ -15,7 +15,7 @@ import {
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuthStore } from '../../store/useAuthStore';
-import { subscribeToHospitalAlerts } from '../../services/emergencyService';
+import { subscribeToHospitalAlerts, updateHospitalAlert } from '../../services/emergencyService';
 import type { HospitalProfile, HospitalAlert, BloodBank } from '../../types';
 
 const BLOOD_TYPES = ['Apos','Aneg','Bpos','Bneg','Opos','Oneg','ABpos','ABneg'] as const;
@@ -388,7 +388,7 @@ export default function HospitalDashboard() {
                     </div>
 
                     {alert.condition && (
-                      <div className="bg-brand-50 rounded-xl p-3 flex items-start gap-2">
+                      <div className="bg-brand-50 rounded-xl p-3 flex items-start gap-2 mb-3">
                         <Activity className="w-3.5 h-3.5 text-brand-600 mt-0.5 shrink-0" />
                         <div>
                           <p className="text-xs font-semibold text-brand-700 mb-0.5">Paramedic Update</p>
@@ -396,6 +396,23 @@ export default function HospitalDashboard() {
                         </div>
                       </div>
                     )}
+
+                    <div className="flex gap-2">
+                      {alert.status === 'en_route' ? (
+                        <button
+                          onClick={() => updateHospitalAlert(alert.id, { status: 'arrived' })}
+                          className="btn-primary w-full py-2 text-xs flex items-center justify-center gap-1.5"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          Acknowledge & Ready Trauma Bay
+                        </button>
+                      ) : (
+                        <div className="w-full bg-green-50 text-green-700 font-semibold text-xs py-2 rounded-xl text-center border border-green-200 flex items-center justify-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          Trauma Bay Prepared · Patient Arrived
+                        </div>
+                      )}
+                    </div>
                   </motion.div>
                 ))}
               </div>

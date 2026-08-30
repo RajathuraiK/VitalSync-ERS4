@@ -70,6 +70,8 @@ export interface SensorData {
   stillnessDuration: number;   // seconds
   audioLevel: number;          // 0–1
   cameraCapture?: string;      // base64 image
+  speechTranscript?: string;   // transcribed voice during capture
+  distressKeywords?: string[]; // detected distress keywords
 }
 
 // ─── Ambulance ────────────────────────────────

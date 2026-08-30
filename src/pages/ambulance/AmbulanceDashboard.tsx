@@ -282,14 +282,34 @@ export default function AmbulanceDashboard() {
                           <p className="text-xs text-gray-400">AI score</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 mb-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                        <MapPin className="w-3 h-3 text-brand-600" />
-                        {e.location.lat.toFixed(5)}, {e.location.lng.toFixed(5)}
-                        <span className="ml-auto flex items-center gap-1">
+                      <div className="flex items-center gap-2 mb-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+                        <MapPin className="w-3 h-3 text-brand-600 shrink-0" />
+                        <span className="truncate">{e.location.lat.toFixed(4)}, {e.location.lng.toFixed(4)}</span>
+                        <span className="ml-auto flex items-center gap-1 font-semibold text-brand-700 shrink-0">
                           <Activity className="w-3 h-3" />
                           {e.sensorData?.maxShakeMagnitude?.toFixed(1)} m/s²
                         </span>
                       </div>
+
+                      {/* Distress Keywords & Voice preview */}
+                      {(e.sensorData?.distressKeywords?.length || e.sensorData?.speechTranscript) && (
+                        <div className="mb-3 bg-red-50/70 border border-red-100 rounded-lg p-2 text-left">
+                          {e.sensorData.distressKeywords && e.sensorData.distressKeywords.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {e.sensorData.distressKeywords.map(k => (
+                                <span key={k} className="badge-red text-[9px] uppercase font-bold py-0">
+                                  🚨 {k}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {e.sensorData.speechTranscript && (
+                            <p className="text-[11px] text-gray-700 italic truncate">
+                              "{e.sensorData.speechTranscript}"
+                            </p>
+                          )}
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <button onClick={() => acceptEmergency(e)} className="btn-primary flex-1 py-2.5 text-sm">
                           Accept Mission

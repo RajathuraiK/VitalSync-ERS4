@@ -1,12 +1,9 @@
 // ─────────────────────────────────────────────
 //  useShakeDetector — Accelerometer Hook
-//
-//  🔧 DEMO MODE — Low thresholds for easy testing
-//  Shake threshold : 3 m/s²  (a gentle quick shake)
-//  Min readings    : 2        (near-instant trigger)
-//  Stillness       : < 2.5 m/s² for 1 second
-//
-//  For production, raise SHAKE_THRESHOLD to 15
+//  • Gravity vector compensation
+//  • Medium demonstration threshold (~10 m/s²)
+//  • Stillness detection post-impact
+//  • Built-in simulation for desktop/demo
 // ─────────────────────────────────────────────
 import { useEffect, useRef, useCallback, useState } from 'react';
 
@@ -18,13 +15,14 @@ export interface ShakeState {
   stillnessDuration: number; // seconds
   permissionGranted: boolean;
   requestPermission: () => Promise<boolean>;
+  simulateShake:    (mag?: number, stillnessSec?: number) => void;
 }
 
-// ── DEMO values — change for production ───────
-const SHAKE_THRESHOLD  = 3;    // m/s²  (was 15 — very sensitive now)
-const SHAKE_MIN_COUNT  = 2;    // readings (was 3 — triggers faster)
-const STILL_THRESHOLD  = 2.5;  // m/s²  (was 1.5 — easier to trigger)
-const STILL_MIN_SEC    = 1;    // seconds (was 3 — triggers in 1s)
+// ── Calibrated Demonstration Thresholds ───────
+const SHAKE_THRESHOLD  = 9.5;   // m/s² — deliberate, medium-firm shake
+const SHAKE_MIN_COUNT  = 2;     // consecutive readings to confirm shake
+const STILL_THRESHOLD  = 1.8;   // m/s² — resting stillness after impact
+const STILL_MIN_SEC    = 1.2;   // seconds of stillness to confirm post-shake state
 
 export function useShakeDetector(
   onShake: (maxMagnitude: number) => void,
@@ -39,6 +37,7 @@ export function useShakeDetector(
     stillnessDuration: 0,
     permissionGranted: false,
     requestPermission: async () => false,
+    simulateShake: () => {},
   });
 
   const shakeCount        = useRef(0);
@@ -47,6 +46,7 @@ export function useShakeDetector(
   const stillStart        = useRef<number | null>(null);
   const onShakeRef        = useRef(onShake);
   const onStillRef        = useRef(onStillnessAfterShake);
+  const simTimerRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   onShakeRef.current = onShake;
   onStillRef.current = onStillnessAfterShake;
@@ -73,22 +73,60 @@ export function useShakeDetector(
     return true;
   }, []);
 
+  // ── Simulator for Desktop / Demo ────────────
+  const simulateShake = useCallback((mag = 14.5, stillnessSec = 2.0) => {
+    if (simTimerRef.current) clearTimeout(simTimerRef.current);
+
+    hadShake.current = true;
+    maxMag.current = mag;
+
+    // Step 1: Trigger active shake
+    setState(s => ({
+      ...s,
+      isShaking: true,
+      magnitude: mag,
+      maxMagnitude: mag,
+      isStill: false,
+      stillnessDuration: 0,
+    }));
+    onShakeRef.current(mag);
+
+    // Step 2: Settle into stillness after 800ms
+    simTimerRef.current = setTimeout(() => {
+      setState(s => ({
+        ...s,
+        isShaking: false,
+        magnitude: 0.3,
+        isStill: true,
+        stillnessDuration: stillnessSec,
+      }));
+      onStillRef.current(stillnessSec);
+    }, 800);
+  }, []);
+
   useEffect(() => {
-    setState(s => ({ ...s, requestPermission }));
-  }, [requestPermission]);
+    setState(s => ({ ...s, requestPermission, simulateShake }));
+  }, [requestPermission, simulateShake]);
 
   useEffect(() => {
     if (!enabled) return;
 
     const handleMotion = (e: DeviceMotionEvent) => {
-      const acc = e.accelerationIncludingGravity;
-      if (!acc) return;
+      let mag = 0;
 
-      const { x = 0, y = 0, z = 0 } = acc;
-      const mag = Math.sqrt((x ?? 0) ** 2 + (y ?? 0) ** 2 + (z ?? 0) ** 2);
+      // Prefer linear acceleration (pure motion excluding 9.8 m/s² gravity)
+      if (e.acceleration && (e.acceleration.x !== null || e.acceleration.y !== null || e.acceleration.z !== null)) {
+        const { x = 0, y = 0, z = 0 } = e.acceleration;
+        mag = Math.sqrt((x ?? 0) ** 2 + (y ?? 0) ** 2 + (z ?? 0) ** 2);
+      } else if (e.accelerationIncludingGravity) {
+        // Fallback: subtract static gravity (9.8 m/s²)
+        const { x = 0, y = 0, z = 0 } = e.accelerationIncludingGravity;
+        const total = Math.sqrt((x ?? 0) ** 2 + (y ?? 0) ** 2 + (z ?? 0) ** 2);
+        mag = Math.abs(total - 9.80665);
+      }
 
-      // ── Shake detection ────────────────────
-      if (mag > SHAKE_THRESHOLD) {
+      // ── Shake Detection ──────────────────
+      if (mag >= SHAKE_THRESHOLD) {
         shakeCount.current += 1;
         if (mag > maxMag.current) maxMag.current = mag;
 
@@ -96,7 +134,7 @@ export function useShakeDetector(
           hadShake.current = true;
           stillStart.current = null;
           setState(s => ({
-            ...s, isShaking: true, maxMagnitude: maxMag.current,
+            ...s, isShaking: true, magnitude: mag, maxMagnitude: maxMag.current,
           }));
           onShakeRef.current(maxMag.current);
         }
@@ -107,7 +145,7 @@ export function useShakeDetector(
         }
       }
 
-      // ── Stillness detection (after shake) ──
+      // ── Stillness Detection (Post-Impact) ──
       if (hadShake.current && mag < STILL_THRESHOLD) {
         if (!stillStart.current) stillStart.current = Date.now();
         const secs = (Date.now() - stillStart.current) / 1000;
@@ -115,7 +153,7 @@ export function useShakeDetector(
         if (secs >= STILL_MIN_SEC) {
           onStillRef.current(secs);
         }
-      } else {
+      } else if (mag >= STILL_THRESHOLD) {
         if (state.isStill) setState(s => ({ ...s, isStill: false, stillnessDuration: 0 }));
         stillStart.current = null;
       }
@@ -124,7 +162,10 @@ export function useShakeDetector(
     };
 
     window.addEventListener('devicemotion', handleMotion, { passive: true });
-    return () => window.removeEventListener('devicemotion', handleMotion);
+    return () => {
+      window.removeEventListener('devicemotion', handleMotion);
+      if (simTimerRef.current) clearTimeout(simTimerRef.current);
+    };
   }, [enabled, state.isShaking, state.isStill]);
 
   return state;
