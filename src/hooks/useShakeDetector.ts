@@ -19,24 +19,28 @@ export interface ShakeState {
 }
 
 // ── Calibrated Demonstration Thresholds ───────
-const SHAKE_THRESHOLD  = 9.5;   // m/s² — deliberate, medium-firm shake
-const SHAKE_MIN_COUNT  = 2;     // consecutive readings to confirm shake
+const SHAKE_THRESHOLD  = 5.0;   // m/s² — easily achievable natural shake
+const SHAKE_MIN_COUNT  = 1;     // immediate response to shake
 const STILL_THRESHOLD  = 1.8;   // m/s² — resting stillness after impact
-const STILL_MIN_SEC    = 1.2;   // seconds of stillness to confirm post-shake state
+const STILL_MIN_SEC    = 1.0;   // seconds of stillness to confirm post-shake state
 
 export function useShakeDetector(
   onShake: (maxMagnitude: number) => void,
   onStillnessAfterShake: (duration: number) => void,
   enabled = true,
 ): ShakeState {
+  const isIOS = typeof DeviceMotionEvent !== 'undefined' &&
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    typeof (DeviceMotionEvent as any).requestPermission === 'function';
+
   const [state, setState] = useState<ShakeState>({
     isShaking: false,
     magnitude: 0,
     maxMagnitude: 0,
     isStill: false,
     stillnessDuration: 0,
-    permissionGranted: false,
-    requestPermission: async () => false,
+    permissionGranted: !isIOS, // Auto-granted for Android & desktop
+    requestPermission: async () => true,
     simulateShake: () => {},
   });
 
@@ -52,7 +56,7 @@ export function useShakeDetector(
   onStillRef.current = onStillnessAfterShake;
 
   const requestPermission = useCallback(async (): Promise<boolean> => {
-    // iOS 13+ requires explicit permission
+    // iOS 13+ requires explicit user gesture permission
     if (
       typeof DeviceMotionEvent !== 'undefined' &&
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -68,7 +72,7 @@ export function useShakeDetector(
         return false;
       }
     }
-    // Android / desktop — no permission needed
+    // Android / desktop — always true
     setState(s => ({ ...s, permissionGranted: true }));
     return true;
   }, []);

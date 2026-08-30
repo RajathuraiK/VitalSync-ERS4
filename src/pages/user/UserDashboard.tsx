@@ -37,7 +37,11 @@ export default function UserDashboard() {
   const [shakeMag,        setShakeMag]        = useState(0);
   const [activeEmergency, setActiveEmergency] = useState<Emergency | null>(null);
   const [history,         setHistory]         = useState<Emergency[]>([]);
-  const [motionEnabled,   setMotionEnabled]   = useState(false);
+  const isIOS = typeof DeviceMotionEvent !== 'undefined' &&
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    typeof (DeviceMotionEvent as any).requestPermission === 'function';
+
+  const [motionEnabled,   setMotionEnabled]   = useState(!isIOS);
   const [tab,             setTab]             = useState<'home' | 'profile' | 'history'>('home');
 
   const gps = useGPS(true);
@@ -56,11 +60,10 @@ export default function UserDashboard() {
 
   const shake = useShakeDetector(handleShake, handleStillness, motionEnabled);
 
-  // Request motion permission on mount
-  useEffect(() => {
-    shake.requestPermission().then(granted => setMotionEnabled(granted));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const enableSensor = async () => {
+    const granted = await shake.requestPermission();
+    setMotionEnabled(granted);
+  };
 
   // Listen to emergency history
   useEffect(() => {
@@ -151,11 +154,13 @@ export default function UserDashboard() {
         </div>
         <div className="flex items-center gap-2">
           {motionEnabled ? (
-            <span className="badge-green text-xs">
+            <span className="badge-green text-xs flex items-center gap-1.5 py-1 px-2.5">
               <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> Monitoring
             </span>
           ) : (
-            <span className="badge-gray text-xs">Sensor off</span>
+            <button onClick={enableSensor} className="badge-gray text-xs hover:bg-brand-50 hover:text-brand-700 py-1 px-2.5 transition-colors">
+              ⚡ Tap to Enable
+            </button>
           )}
           <button onClick={signOut} className="btn-ghost p-2">
             <LogOut className="w-4 h-4" />
